@@ -1,0 +1,23 @@
+# Go build artifacts
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go workspace files
+*.test
+*.out
+
+# Dependency directories
+vendor/
+
+# SQLite database file
+todos.db
+
+# IDE/editor files
+.vscode/
+.idea/
+*.swp
+*.swo
