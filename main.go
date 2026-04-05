@@ -9,46 +9,25 @@ import (
 )
 
 func main() {
-	// Open a database connection
 	db, err := sql.Open("sqlite3", "todos.db")
 	if err != nil {
-		// log.Fatal calls log.Print then os.Exit(1)
 		log.Fatal("Failed to open database:", err)
 	}
-
 	defer db.Close()
 
-	// Verify the connection actually works
 	err = db.Ping()
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
 	}
-
 	fmt.Println("✅ Successfully connected to SQLite database!")
-
-	// Create a table
 
 	createTableSQL := `
     CREATE TABLE IF NOT EXISTS todos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        -- INTEGER PRIMARY KEY + AUTOINCREMENT = auto-incrementing integer ID
-        -- In SQLite, this is the standard way to create auto-increment IDs
-        
         title TEXT NOT NULL,
-        -- TEXT = string type
-        -- NOT NULL = this field cannot be empty
-        
         description TEXT,
-        -- No NOT NULL = this field can be NULL (optional)
-        
         completed BOOLEAN DEFAULT FALSE,
-        -- BOOLEAN = true/false (SQLite stores as 0 or 1)
-        -- DEFAULT FALSE = if not specified, defaults to false
-        
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        -- TIMESTAMP = date/time
-        -- DEFAULT CURRENT_TIMESTAMP = automatically set to current time
-        
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     `
@@ -57,40 +36,19 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to create table:", err)
 	}
-
 	fmt.Println("✅ Table 'todos' created (or already exists)")
 
-	// ============================================
-	// STEP 4: Insert a record
-	// ============================================
-
-	insertSQL := `
-    INSERT INTO todos (title, description) 
-    VALUES (?, ?)
-    `
-	// ? are placeholders (parameterized queries)
-	// They prevent SQL injection - the driver safely escapes the values
-
-	// Exec returns a Result which has:
-	// - LastInsertId(): The auto-generated ID
-	// - RowsAffected(): Number of rows affected
+	insertSQL := `INSERT INTO todos (title, description) VALUES (?, ?)`
 
 	result, err := db.Exec(insertSQL, "Learn Go", "Study Go fundamentals")
 	if err != nil {
 		log.Fatal("Failed to insert todo:", err)
 	}
-
-	// Get the auto-generated ID
 	id, err := result.LastInsertId()
 	if err != nil {
 		log.Fatal("Failed to get last insert ID:", err)
 	}
-
 	fmt.Printf("✅ Inserted todo with ID: %d\n", id)
-
-	// ============================================
-	// STEP 5: Insert multiple records
-	// ============================================
 
 	todos := []struct {
 		Title       string
@@ -102,11 +60,7 @@ func main() {
 	}
 
 	for _, todo := range todos {
-		result, err := db.Exec(
-			insertSQL,
-			todo.Title,
-			todo.Description,
-		)
+		result, err := db.Exec(insertSQL, todo.Title, todo.Description)
 		if err != nil {
 			log.Printf("Failed to insert '%s': %v", todo.Title, err)
 			continue
@@ -115,33 +69,15 @@ func main() {
 		fmt.Printf("✅ Inserted todo with ID: %d\n", id)
 	}
 
-	// ============================================
-	// STEP 6: Query a single row
-	// ============================================
-	// QueryRow is used when you expect exactly ONE row
-	// If no rows match, it returns sql.ErrNoRows
-	// If multiple rows match, it only returns the first
-
 	var (
 		title       string
 		description string
 		completed   bool
 	)
 
-	querySingleSQL := `
-    SELECT title, description, completed 
-    FROM todos 
-    WHERE id = ?
-    `
+	querySingleSQL := `SELECT title, description, completed FROM todos WHERE id = ?`
 
-	// QueryRow returns a *Row
-	// You must call Scan() to actually execute the query and read values
-	err = db.QueryRow(querySingleSQL, 1).Scan(
-		&title, // & means "address of" - Scan writes to this variable
-		&description,
-		&completed,
-	)
-
+	err = db.QueryRow(querySingleSQL, 1).Scan(&title, &description, &completed)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			fmt.Println("⚠️ No todo found with ID 1")
@@ -149,15 +85,8 @@ func main() {
 			log.Fatal("Failed to query todo:", err)
 		}
 	} else {
-		fmt.Printf("📋 Found todo: %s - %s (completed: %v)\n",
-			title, description, completed)
+		fmt.Printf("📋 Found todo: %s - %s (completed: %v)\n", title, description, completed)
 	}
-
-	// ============================================
-	// STEP 7: Query multiple rows
-	// ============================================
-	// Query is used when you expect ZERO or MORE rows
-	// It returns *Rows which you iterate over
 
 	queryAllSQL := `SELECT id, title, description, completed FROM todos`
 
@@ -165,16 +94,11 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to query todos:", err)
 	}
-
-	// CRITICAL: Always close rows when done
-	// This releases the database connection back to the pool
 	defer rows.Close()
 
 	fmt.Println("\n📋 All Todos:")
 	fmt.Println("─────────────────────────────────────────")
 
-	// Next() moves to the next row
-	// Returns false when there are no more rows
 	for rows.Next() {
 		var (
 			id          int
@@ -182,9 +106,6 @@ func main() {
 			description string
 			completed   bool
 		)
-
-		// Scan reads column values into variables
-		// Order must match SELECT order
 		err := rows.Scan(&id, &title, &description, &completed)
 		if err != nil {
 			log.Fatal("Failed to scan row:", err)
@@ -194,79 +115,46 @@ func main() {
 		if completed {
 			status = "✅"
 		}
-
 		fmt.Printf("%s [%d] %s - %s\n", status, id, title, description)
 	}
 
-	// CRITICAL: Always check for errors after the loop
-	// Errors can occur during iteration
 	err = rows.Err()
 	if err != nil {
 		log.Fatal("Error iterating rows:", err)
 	}
 
-	// ============================================
-	// STEP 8: Update a record
-	// ============================================
-
-	updateSQL := `
-    UPDATE todos 
-    SET completed = ?, updated_at = CURRENT_TIMESTAMP 
-    WHERE id = ?
-    `
+	updateSQL := `UPDATE todos SET completed = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
 
 	result, err = db.Exec(updateSQL, true, 1)
 	if err != nil {
 		log.Fatal("Failed to update todo:", err)
 	}
-
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		log.Fatal("Failed to get rows affected:", err)
 	}
-
 	fmt.Printf("\n✅ Updated %d row(s)\n", rowsAffected)
-
-	// ============================================
-	// STEP 9: Delete a record
-	// ============================================
 
 	deleteSQL := `DELETE FROM todos WHERE id = ?`
 
-	result, err = db.Exec(deleteSQL, 4) // Delete the last one
+	result, err = db.Exec(deleteSQL, 4)
 	if err != nil {
 		log.Fatal("Failed to delete todo:", err)
 	}
-
 	rowsAffected, err = result.RowsAffected()
 	if err != nil {
 		log.Fatal("Failed to get rows affected:", err)
 	}
-
 	fmt.Printf("✅ Deleted %d row(s)\n", rowsAffected)
-
-	// ============================================
-	// STEP 10: Demonstrate prepared statements
-	// ============================================
-	// Prepared statements are pre-compiled SQL
-	// Benefits:
-	// 1. Better performance for repeated queries
-	// 2. Automatic SQL injection prevention
-	// 3. Type safety
 
 	fmt.Println("\n📝 Using Prepared Statements:")
 
-	// Prepare the statement once
-	stmt, err := db.Prepare(`
-        INSERT INTO todos (title, description) 
-        VALUES (?, ?)
-    `)
+	stmt, err := db.Prepare(`INSERT INTO todos (title, description) VALUES (?, ?)`)
 	if err != nil {
 		log.Fatal("Failed to prepare statement:", err)
 	}
-	defer stmt.Close() // Close when done
+	defer stmt.Close()
 
-	// Execute multiple times with different values
 	prepTitles := []string{"Task A", "Task B", "Task C"}
 	for _, t := range prepTitles {
 		result, err := stmt.Exec(t, "Created with prepared statement")
@@ -278,12 +166,10 @@ func main() {
 		fmt.Printf("✅ Prepared statement inserted ID: %d\n", id)
 	}
 
-	// Print final state
 	fmt.Println("\n📋 Final Todo List:")
 	printAllTodos(db)
 }
 
-// Helper function to print all todos
 func printAllTodos(db *sql.DB) {
 	rows, err := db.Query(`
         SELECT id, title, completed 
