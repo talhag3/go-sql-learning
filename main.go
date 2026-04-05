@@ -5,56 +5,20 @@ import (
 	"fmt"
 	"log"
 
-	// This is a blank import - only needed for side effects
-	// It registers the sqlite3 driver with database/sql
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// ============================================
-// WHAT IS database/sql?
-// ============================================
-// database/sql is Go's standard library package for
-// working with SQL databases. It provides:
-//
-// 1. A generic interface - works with any SQL database
-// 2. Connection pooling - manages connections efficiently
-// 3. Prepared statements - prevents SQL injection
-// 4. Transaction support - ensures data consistency
-//
-// The actual database-specific code is in "drivers"
-// that you import with _ (blank import)
-// ============================================
-
 func main() {
-	// ============================================
-	// STEP 1: Open a database connection
-	// ============================================
-	// sql.Open doesn't actually connect to the database!
-	// It just validates the driver name and prepares the connection string.
-	// The actual connection happens when you execute a query.
-	//
-	// Parameters:
-	// - "sqlite3": The driver name (registered by the blank import)
-	// - "todos.db": Connection string (for SQLite, it's the file path)
-	//   If file doesn't exist, SQLite creates it
-
+	// Open a database connection
 	db, err := sql.Open("sqlite3", "todos.db")
 	if err != nil {
 		// log.Fatal calls log.Print then os.Exit(1)
 		log.Fatal("Failed to open database:", err)
 	}
 
-	// CRITICAL: Always close the database when done
-	// defer ensures this runs when main() returns
-	// Even if there's a panic, defer still runs
 	defer db.Close()
 
-	// ============================================
-	// STEP 2: Verify the connection actually works
-	// ============================================
-	// Ping actually connects to the database and checks if it's alive
-	// This is important because sql.Open is lazy
-
+	// Verify the connection actually works
 	err = db.Ping()
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
@@ -62,18 +26,7 @@ func main() {
 
 	fmt.Println("✅ Successfully connected to SQLite database!")
 
-	// ============================================
-	// STEP 3: Create a table
-	// ============================================
-	// Exec is used for SQL statements that don't return rows:
-	// - CREATE TABLE
-	// - INSERT
-	// - UPDATE
-	// - DELETE
-	//
-	// It returns:
-	// - Result: Contains info about what was affected
-	// - Error: If something went wrong
+	// Create a table
 
 	createTableSQL := `
     CREATE TABLE IF NOT EXISTS todos (
