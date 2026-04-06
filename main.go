@@ -65,24 +65,28 @@ func CloseDB(db *sql.DB) {
 	fmt.Println("Db connection closed")
 }
 
-func createTask(db *sql.DB, task string) {
-	insertSQL := `
-    INSERT INTO todos (task) 
-    VALUES (?)
-    `
+func createTask(db *sql.DB, task string) (Todo, error) {
+	insertSQL := `INSERT INTO todos (task) VALUES (?)`
 
 	result, err := db.Exec(insertSQL, task)
 	if err != nil {
-		log.Fatal("Failed to insert todo:", err)
+		return Todo{}, err
 	}
 
-	// Get the auto-generated ID
 	id, err := result.LastInsertId()
 	if err != nil {
-		log.Fatal("Failed to get last insert ID:", err)
+		return Todo{}, err
 	}
 
-	fmt.Printf("✅ Inserted todo with ID: %d\n", id)
+	// Query the inserted record
+	var todo Todo
+	querySQL := `SELECT id, task, done, created_at FROM todos WHERE id = ?`
+	err = db.QueryRow(querySQL, id).Scan(&todo.ID, &todo.Task, &todo.Done, &todo.CreatedAt)
+	if err != nil {
+		return Todo{}, err
+	}
+
+	return todo, nil
 }
 
 func deleteTask(db *sql.DB, id int) {
@@ -222,8 +226,19 @@ func handleCreate(db *sql.DB, args []string) {
 
 	task := strings.Join(args[1:], " ")
 
-	createTask(db, task)
+	todo, err := createTask(db, task)
 
+	if err != nil {
+		fmt.Println("Error creating task:", err)
+		return
+	}
+
+	fmt.Println("\nTodo Created Successfully!")
+	fmt.Println("─────────────────────────────────────────")
+	fmt.Printf("  ID:        %d\n", todo.ID)
+	fmt.Printf("  Task:      %s\n", todo.Task)
+	fmt.Printf("  Status:    %s\n", map[bool]string{true: "✅ Done", false: "❌ Pending"}[todo.Done])
+	fmt.Printf("  Created:   %s\n", todo.CreatedAt.Format("2006-01-02 15:04:05"))
 }
 
 func handleDelete(db *sql.DB, args []string) {
