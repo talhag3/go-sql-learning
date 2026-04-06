@@ -1,12 +1,147 @@
 package main
 
 import (
-	//"log"
+	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
-	//_ "github.com/mattn/go-sqlite3"
+	"strings"
+	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 )
+
+type Todo struct {
+	ID        int
+	Task      string
+	Done      bool
+	CreatedAt time.Time
+}
+
+const LIMIT = 10
+
+/* DB Management */
+
+func InitDB() *sql.DB {
+	db, err := sql.Open("sqlite3", "todos.db")
+	if err != nil {
+		log.Fatal("Failed to open database:", err)
+	}
+
+	err = db.Ping()
+	if err != nil {
+		log.Fatal("Failed to connect to database:", err)
+	}
+
+	// fmt.Println("Successfully connected to SQLite database!")
+
+	createTableSQL := `
+    CREATE TABLE IF NOT EXISTS todos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task TEXT NOT NULL,
+        done BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    `
+
+	_, err = db.Exec(createTableSQL)
+	if err != nil {
+		log.Fatal("Failed to create table:", err)
+	}
+
+	fmt.Println("Table 'todos' created (or already exists)")
+
+	return db
+}
+
+func CloseDB(db *sql.DB) {
+	err := db.Close()
+	if err != nil {
+		log.Fatal("Error closing the db", err)
+	}
+
+	fmt.Println("Db connection closed")
+}
+
+func createTask(db *sql.DB, task string) {
+	insertSQL := `
+    INSERT INTO todos (task) 
+    VALUES (?)
+    `
+
+	result, err := db.Exec(insertSQL, task)
+	if err != nil {
+		log.Fatal("Failed to insert todo:", err)
+	}
+
+	// Get the auto-generated ID
+	id, err := result.LastInsertId()
+	if err != nil {
+		log.Fatal("Failed to get last insert ID:", err)
+	}
+
+	fmt.Printf("✅ Inserted todo with ID: %d\n", id)
+}
+
+func deleteTask(db *sql.DB, id int) {
+	deleteSQL := `DELETE FROM todos WHERE id = ?`
+
+	result, err := db.Exec(deleteSQL, id)
+	if err != nil {
+		log.Fatal("Failed to delete todo:", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Fatal("Failed to get rows affected:", err)
+	}
+
+	fmt.Printf("✅ Deleted %d row(s)\n", rowsAffected)
+}
+
+func updateTask(db *sql.DB, id int, task string) {
+	updateSQL := `
+    UPDATE todos 
+    SET task = ?, updated_at = CURRENT_TIMESTAMP 
+    WHERE id = ?
+    `
+
+	result, err := db.Exec(updateSQL, task, id)
+	if err != nil {
+		log.Fatal("Failed to update todo:", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Fatal("Failed to get rows affected:", err)
+	}
+
+	fmt.Printf("\n✅ Updated %d row(s)\n", rowsAffected)
+}
+
+func toggleTask(db *sql.DB, id int) {
+	updateSQL := `
+    UPDATE todos 
+    SET done = NOT done, updated_at = CURRENT_TIMESTAMP 
+    WHERE id = ?
+    `
+
+	result, err := db.Exec(updateSQL, id)
+	if err != nil {
+		log.Fatal("Failed to update todo:", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Fatal("Failed to get rows affected:", err)
+	}
+
+	fmt.Printf("\n✅ Updated %d row(s)\n", rowsAffected)
+}
+
+/* ------------------------- */
 
 func PrintHelp() {
 	fmt.Println("\n Available Commands:")
@@ -19,7 +154,7 @@ func PrintHelp() {
 	fmt.Println("  version | v           Show version")
 }
 
-func handleList(args []string) {
+func handleList(db *sql.DB, args []string) {
 	page := 1
 
 	if len(args) > 1 {
@@ -37,25 +172,61 @@ func handleList(args []string) {
 	}
 
 	fmt.Println("Listing page:", page)
+
+	offset := (page - 1) * LIMIT
+	queryAllSQL := `SELECT id, task, done FROM todos LIMIT ? OFFSET ?`
+
+	rows, err := db.Query(queryAllSQL, LIMIT, offset)
+	if err != nil {
+		log.Fatal("Failed to query todos:", err)
+	}
+
+	// Always close rows when done
+	defer rows.Close()
+
+	fmt.Println("\nAll Todos:")
+	fmt.Println("─────────────────────────────────────────")
+
+	for rows.Next() {
+		var (
+			id   int
+			task string
+			done bool
+		)
+
+		err := rows.Scan(&id, &task, &done)
+		if err != nil {
+			log.Fatal("Failed to scan row:", err)
+		}
+
+		status := "❌"
+		if done {
+			status = "✅"
+		}
+
+		fmt.Printf("%s [%d] %s \n", status, id, task)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		log.Fatal("Error iterating rows:", err)
+	}
 }
 
-func handleCreate(args []string) {
+func handleCreate(db *sql.DB, args []string) {
 	if len(args) < 2 {
-		fmt.Println("Name is required")
+		fmt.Println("task text is required")
 		fmt.Println("Usage: create <task>")
 		return
 	}
 
-	if len(args) > 2 {
-		fmt.Println("Too many arguments for 'create'")
-		return
-	}
+	task := strings.Join(args[1:], " ")
 
-	task := args[1]
-	fmt.Println("Created task:", task)
+	createTask(db, task)
+
 }
 
-func handleDelete(args []string) {
+func handleDelete(db *sql.DB, args []string) {
 	if len(args) < 2 {
 		fmt.Println("ID is required")
 		fmt.Println("Usage: delete <id>")
@@ -68,10 +239,10 @@ func handleDelete(args []string) {
 		return
 	}
 
-	fmt.Println("Deleted task with ID:", id)
+	deleteTask(db, id)
 }
 
-func handleUpdate(args []string) {
+func handleUpdate(db *sql.DB, args []string) {
 	if len(args) < 3 {
 		fmt.Println("ID and task are required")
 		fmt.Println("Usage: update <id> <task>")
@@ -84,18 +255,31 @@ func handleUpdate(args []string) {
 		return
 	}
 
-	name := args[2]
+	task := strings.Join(args[2:], " ")
 
-	if len(args) > 3 {
-		fmt.Println("Too many arguments for 'update'")
+	updateTask(db, id, task)
+}
+
+func handleToggle(db *sql.DB, args []string) {
+	if len(args) < 2 {
+		fmt.Println("ID is required")
+		fmt.Println("Usage: toggle <id>")
 		return
 	}
 
-	fmt.Println("Updated task:", id, "->", name)
+	id, err := strconv.Atoi(args[1])
+	if err != nil || id <= 0 {
+		fmt.Println("Invalid ID")
+		return
+	}
+
+	toggleTask(db, id)
 }
 
 func main() {
 	args := os.Args[1:]
+	db := InitDB()
+	defer CloseDB(db)
 
 	if len(args) == 0 {
 		fmt.Println("No command provided")
@@ -109,16 +293,19 @@ func main() {
 		PrintHelp()
 
 	case "list":
-		handleList(args)
+		handleList(db, args)
 
 	case "create":
-		handleCreate(args)
+		handleCreate(db, args)
 
 	case "delete":
-		handleDelete(args)
+		handleDelete(db, args)
 
 	case "update":
-		handleUpdate(args)
+		handleUpdate(db, args)
+
+	case "toggle":
+		handleToggle(db, args)
 
 	case "version", "v":
 		fmt.Println("App Version: 1.0.0")
