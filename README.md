@@ -107,8 +107,5 @@ This project demonstrates:
 
 ## Future Improvements
 
-- [ ] Refactor log.Fatal to return errors for better error handling
-- [ ] Add total count display in list view
-- [ ] Add search/filter functionality
 - [ ] Split code into multiple files (db.go, handlers.go, models.go)
 - [ ] Add configuration file support

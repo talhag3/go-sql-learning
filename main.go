@@ -89,60 +89,111 @@ func createTask(db *sql.DB, task string) (Todo, error) {
 	return todo, nil
 }
 
-func deleteTask(db *sql.DB, id int) {
+func getTodos(db *sql.DB, page int) ([]Todo, int, error) {
+	var todos []Todo
+	offset := (page - 1) * LIMIT
+	queryAllSQL := `SELECT id, task, done, created_at FROM todos LIMIT ? OFFSET ?`
+
+	rows, err := db.Query(queryAllSQL, LIMIT, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var todo Todo
+		err := rows.Scan(&todo.ID, &todo.Task, &todo.Done, &todo.CreatedAt)
+		if err != nil {
+			return nil, 0, err
+		}
+		todos = append(todos, todo)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, 0, err
+	}
+
+	/* Get total records count */
+
+	countSql := "SELECT  COUNT(*) from todos"
+	var total int
+	err = db.QueryRow(countSql).Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+	return todos, total, nil
+}
+
+func deleteTask(db *sql.DB, id int) (int64, error) {
 	deleteSQL := `DELETE FROM todos WHERE id = ?`
 
 	result, err := db.Exec(deleteSQL, id)
 	if err != nil {
-		log.Fatal("Failed to delete todo:", err)
+		return 0, err
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		log.Fatal("Failed to get rows affected:", err)
+		return 0, err
 	}
 
-	fmt.Printf("✅ Deleted %d row(s)\n", rowsAffected)
+	return rowsAffected, nil
 }
 
-func updateTask(db *sql.DB, id int, task string) {
-	updateSQL := `
-    UPDATE todos 
-    SET task = ?, updated_at = CURRENT_TIMESTAMP 
-    WHERE id = ?
-    `
+func updateTask(db *sql.DB, id int, task string) (Todo, error) {
+	updateSQL := `UPDATE todos SET task = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
 
 	result, err := db.Exec(updateSQL, task, id)
 	if err != nil {
-		log.Fatal("Failed to update todo:", err)
+		return Todo{}, err
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		log.Fatal("Failed to get rows affected:", err)
+		return Todo{}, err
 	}
 
-	fmt.Printf("\n✅ Updated %d row(s)\n", rowsAffected)
+	if rowsAffected == 0 {
+		return Todo{}, fmt.Errorf("todo with ID %d not found", id)
+	}
+
+	var todo Todo
+	querySQL := `SELECT id, task, done, created_at FROM todos WHERE id = ?`
+	err = db.QueryRow(querySQL, id).Scan(&todo.ID, &todo.Task, &todo.Done, &todo.CreatedAt)
+	if err != nil {
+		return Todo{}, err
+	}
+
+	return todo, nil
 }
 
-func toggleTask(db *sql.DB, id int) {
-	updateSQL := `
-    UPDATE todos 
-    SET done = NOT done, updated_at = CURRENT_TIMESTAMP 
-    WHERE id = ?
-    `
+func toggleTask(db *sql.DB, id int) (Todo, error) {
+	updateSQL := `UPDATE todos SET done = NOT done, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
 
 	result, err := db.Exec(updateSQL, id)
 	if err != nil {
-		log.Fatal("Failed to update todo:", err)
+		return Todo{}, err
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		log.Fatal("Failed to get rows affected:", err)
+		return Todo{}, err
 	}
 
-	fmt.Printf("\n✅ Updated %d row(s)\n", rowsAffected)
+	if rowsAffected == 0 {
+		return Todo{}, fmt.Errorf("todo with ID %d not found", id)
+	}
+
+	var todo Todo
+	querySQL := `SELECT id, task, done, created_at FROM todos WHERE id = ?`
+	err = db.QueryRow(querySQL, id).Scan(&todo.ID, &todo.Task, &todo.Done, &todo.CreatedAt)
+	if err != nil {
+		return Todo{}, err
+	}
+
+	return todo, nil
 }
 
 /* ------------------------- */
@@ -175,46 +226,27 @@ func handleList(db *sql.DB, args []string) {
 		return
 	}
 
-	fmt.Println("Listing page:", page)
+	todos, total, err := getTodos(db, page)
 
-	offset := (page - 1) * LIMIT
-	queryAllSQL := `SELECT id, task, done FROM todos LIMIT ? OFFSET ?`
-
-	rows, err := db.Query(queryAllSQL, LIMIT, offset)
 	if err != nil {
-		log.Fatal("Failed to query todos:", err)
+		fmt.Println("Error getting the todos", err)
+		return
 	}
 
-	// Always close rows when done
-	defer rows.Close()
+	totalPages := (total + LIMIT - 1) / LIMIT
+	fmt.Printf("\n=== Todos (Page %d of %d) ===\n", page, totalPages)
+	fmt.Print("\n─────────────────────────────────────────\n\n")
 
-	fmt.Println("\nAll Todos:")
-	fmt.Println("─────────────────────────────────────────")
-
-	for rows.Next() {
-		var (
-			id   int
-			task string
-			done bool
-		)
-
-		err := rows.Scan(&id, &task, &done)
-		if err != nil {
-			log.Fatal("Failed to scan row:", err)
-		}
-
+	for _, todo := range todos {
 		status := "❌"
-		if done {
+		if todo.Done {
 			status = "✅"
 		}
-
-		fmt.Printf("%s [%d] %s \n", status, id, task)
+		fmt.Printf("%s [%d] %s\n", status, todo.ID, todo.Task)
 	}
 
-	err = rows.Err()
-	if err != nil {
-		log.Fatal("Error iterating rows:", err)
-	}
+	fmt.Print("\n\n─────────────────────────────────────────\n")
+	fmt.Printf("Total: %d todos\n", total)
 }
 
 func handleCreate(db *sql.DB, args []string) {
@@ -254,7 +286,18 @@ func handleDelete(db *sql.DB, args []string) {
 		return
 	}
 
-	deleteTask(db, id)
+	rowsAffected, err := deleteTask(db, id)
+	if err != nil {
+		fmt.Println("Error deleting task:", err)
+		return
+	}
+
+	if rowsAffected == 0 {
+		fmt.Printf("⚠️  No todo found with ID: %d\n", id)
+		return
+	}
+
+	fmt.Printf("✅ Deleted todo #%d successfully\n", id)
 }
 
 func handleUpdate(db *sql.DB, args []string) {
@@ -272,7 +315,18 @@ func handleUpdate(db *sql.DB, args []string) {
 
 	task := strings.Join(args[2:], " ")
 
-	updateTask(db, id, task)
+	todo, err := updateTask(db, id, task)
+	if err != nil {
+		fmt.Println("Error updating task:", err)
+		return
+	}
+
+	fmt.Println("\n✅ Todo Updated Successfully!")
+	fmt.Println("─────────────────────────────────────────")
+	fmt.Printf("  ID:        %d\n", todo.ID)
+	fmt.Printf("  Task:      %s\n", todo.Task)
+	fmt.Printf("  Status:    %s\n", map[bool]string{true: "✅ Done", false: "❌ Pending"}[todo.Done])
+	fmt.Printf("  Created:   %s\n", todo.CreatedAt.Format("2006-01-02 15:04:05"))
 }
 
 func handleToggle(db *sql.DB, args []string) {
@@ -288,7 +342,22 @@ func handleToggle(db *sql.DB, args []string) {
 		return
 	}
 
-	toggleTask(db, id)
+	todo, err := toggleTask(db, id)
+	if err != nil {
+		fmt.Println("Error toggling task:", err)
+		return
+	}
+
+	status := "❌ Pending"
+	if todo.Done {
+		status = "✅ Done"
+	}
+
+	fmt.Println("\n✅ Todo Toggled Successfully!")
+	fmt.Println("─────────────────────────────────────────")
+	fmt.Printf("  ID:        %d\n", todo.ID)
+	fmt.Printf("  Task:      %s\n", todo.Task)
+	fmt.Printf("  Status:    %s\n", status)
 }
 
 func main() {
