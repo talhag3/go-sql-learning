@@ -1,4 +1,4 @@
-module github/talhag3/go-sqlite-learning
+module github.com/talhag3/go-sql-learning
 
 go 1.26.1
 
